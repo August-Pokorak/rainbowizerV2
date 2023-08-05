@@ -2,14 +2,14 @@ package main
 
 import "fmt"
 
-func mapWorker(from []float64, to []float64, f func(float64) float64, done chan bool){
+func mapWorker[F any, T any](from []F, to []T, f func(F) T, done chan bool){
 	for i := 0; i < len(from); i++ {
 		to[i] = f(from[i])
 	}
 	done <- true
 }
 
-func runMap(from []float64, to []float64, f func(float64) float64) error{
+func runMap[F any, T any](from []F, to []T, f func(F) T) error{
 	if len(from) != len(to) {
 		return fmt.Errorf("Map failed, from and to fields of different lengths.\nFrom:%d\nTo:%d\n", len(from), len(to))
 	}
@@ -25,7 +25,7 @@ func runMap(from []float64, to []float64, f func(float64) float64) error{
 			end = (i+1) * rowsPerThread
 		}
 		//fmt.Printf("starting worker for range %d:%d\n", start, end)
-		go mapWorker(from[start:end], to[start:end], f, c)
+		go mapWorker[F, T](from[start:end], to[start:end], f, c)
 	}
 	for i := 0; i < nThreads; i++ {
 		<- c
@@ -33,10 +33,9 @@ func runMap(from []float64, to []float64, f func(float64) float64) error{
 	return nil
 }
 
-func reduceWorker(data []float64, f func(float64, float64) float64, value chan float64){
+func reduceWorker[T any](data []T, f func(T, T) T, value chan T){
 	switch len(data) {
 	case 0:
-		value <- 0	// best guess
 		return
 	case 1:
 		value <- data[0]
@@ -51,16 +50,16 @@ func reduceWorker(data []float64, f func(float64, float64) float64, value chan f
 	value <- res
 }
 
-func runReduce(data []float64, f func(float64, float64) float64) float64{
+func runReduce[T any](data []T, f func(T, T) T) T{
 	rows := len(data)
 	rowsPerThread := rows / nThreads
-	c := make(chan float64)
-	var value float64
+	c := make(chan T)
+	var value T
 	nWorkers := nThreads
 
 	switch len(data) {
 	case 0:
-		return 0
+		return data[0]
 	case 1:
 		return data[0]
 	case 2:
@@ -72,7 +71,7 @@ func runReduce(data []float64, f func(float64, float64) float64) float64{
 	}
 
 	if nWorkers == 1 {
-		go reduceWorker(data, f, c)
+		go reduceWorker[T](data, f, c)
 		return <-c
 	}
 
@@ -85,7 +84,7 @@ func runReduce(data []float64, f func(float64, float64) float64) float64{
 			end = (i + 1) * rowsPerThread
 		}
 		//fmt.Printf("starting worker for range %d:%d\n", start, end)
-		go reduceWorker(data[start:end], f, c)
+		go reduceWorker[T](data[start:end], f, c)
 	}
 
 	first, second := <-c, <-c
@@ -98,14 +97,14 @@ func runReduce(data []float64, f func(float64, float64) float64) float64{
 	return value
 }
 
-func binOpWorker(a []float64, b []float64, to []float64, f func(float64, float64) float64, done chan bool){
+func binOpWorker[A any, B any, T any](a []A, b []B, to []T, f func(A, B) T, done chan bool){
 	for i := 0; i < len(a); i++ {
 		to[i] = f(a[i], b[i])
 	}
 	done <- true
 }
 
-func runBinOp(a []float64, b []float64, to []float64, f func(float64, float64) float64) error{
+func runBinOp[A any, B any, T any](a []A, b []B, to []T, f func(A, B) T) error{
 	if len(a) != len(to) || len(b) != len(to) {
 		return fmt.Errorf("Map failed, a, b, and to fields of different lengths.\na:%d\nb:%d\nto:%d\n", len(a), len(b), len(to))
 	}
@@ -121,7 +120,7 @@ func runBinOp(a []float64, b []float64, to []float64, f func(float64, float64) f
 			end = (i+1) * rowsPerThread
 		}
 		//fmt.Printf("starting worker for range %d:%d\n", start, end)
-		go binOpWorker(a[start:end], b[start:end], to[start:end], f, c)
+		go binOpWorker[A, B, T](a[start:end], b[start:end], to[start:end], f, c)
 	}
 	for i := 0; i < nThreads; i++ {
 		<- c

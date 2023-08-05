@@ -1,11 +1,15 @@
 package main
 
 import (
+	"github.com/PerformLine/go-stockutil/colorutil"
+	"image/color"
+	"image/png"
+	"math"
+	"os"
 	//"errors"
 	"fmt"
 	"runtime"
 
-	//"github.com/PerformLine/go-stockutil/colorutil"
 	"image"
 )
 
@@ -16,141 +20,57 @@ func convertToHSL(img image.Image){
 
 }
 
-func rainbowize(img image.Image){
-	//colorutil.Color{}
-}
 
-type job struct {
-	
-	
-}
+func rainbowize(img image.Image) image.Image{
+	bounds := img.Bounds()
+	//fmt.Println(bounds)
+	width, height := bounds.Max.X, bounds.Max.Y
+	newImg := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	fmt.Println("Step 1: converting to HSV array")
+
+	totalPx := int64(width) * int64(height)
+	totalPxf := float64(totalPx)
 
 
-func mapWorker(from []float64, to []float64, f func(float64) float64, done chan bool){
-	for i := 0; i < len(from); i++ {
-		to[i] = f(from[i])
-	}
-	done <- true
-}
+	h := make([]float64, totalPx)
+	s := make([]float64, totalPx)
+	l := make([]float64, totalPx)
+	for x := 0; x < width; x++ {
+		for y := 0; y < height; y++ {
+			i := (height * x) + y
 
-func runMap(from []float64, to []float64, f func(float64) float64) error{
-	if len(from) != len(to) {
-		return fmt.Errorf("Map failed, from and to fields of different lengths.\nFrom:%d\nTo:%d\n", len(from), len(to))
-	}
-	rows := len(from)
-	rowsPerThread := rows / nThreads
-	c := make(chan bool)
-	for i := 0; i < nThreads; i++ {
-		start := i * rowsPerThread
-		var end int
-		if i == nThreads-1 {
-			end = rows
-		} else {
-			end = (i+1) * rowsPerThread
+			r, g, b, _ := img.At(x, y).RGBA()
+			h[i], s[i], l[i] = colorutil.RgbToHsl(
+				float64(r) / 0xffff * 255,
+				float64(g) / 0xffff * 255,
+				float64(b) / 0xffff * 255)
 		}
-		//fmt.Printf("starting worker for range %d:%d\n", start, end)
-		go mapWorker(from[start:end], to[start:end], f, c)
-	}
-	for i := 0; i < nThreads; i++ {
-		<- c
-	}
-	return nil
-}
-
-func reduceWorker(data []float64, f func(float64, float64) float64, value chan float64){
-	switch len(data) {
-	case 0:
-		value <- 0	// best guess
-		return
-	case 1:
-		value <- data[0]
-		return
 	}
 
-	var res = f(data[0], data[1])
+	avgHue := runReduce(h, func(f float64, f2 float64) float64 {
+		return f + f2
+	}) / totalPxf
+	fmt.Println(avgHue)
 
-	for i := 2; i < len(data); i++ {
-		res = f(res, data[i])
-	}
-	value <- res
-}
+	runMap(h, h, func(f float64) float64 {
+		return math.Mod(f + 150, 360)
+	})
 
-func runReduce(data []float64, f func(float64, float64) float64) float64{
-	rows := len(data)
-	rowsPerThread := rows / nThreads
-	c := make(chan float64)
-	var value float64
-	nWorkers := nThreads
+	avgHue = runReduce(h, func(f float64, f2 float64) float64 {
+		return f + f2
+	}) / totalPxf
+	fmt.Println(avgHue)
 
-	switch len(data) {
-	case 0:
-		return 0
-	case 1:
-		return data[0]
-	case 2:
-		return f(data[0], data[1])
-	}
-
-	if nWorkers > len(data) {
-		nWorkers = len(data)
-	}
-
-	if nWorkers == 1 {
-		go reduceWorker(data, f, c)
-		return <-c
-	}
-
-	for i := 0; i < nWorkers; i++ {
-		start := i * rowsPerThread
-		var end int
-		if i == nWorkers-1 {
-			end = rows
-		} else {
-			end = (i + 1) * rowsPerThread
+	fmt.Println("Step n - 1: creating new image")
+	for x := 0; x < width; x++ {
+		for y := 0; y < height; y++ {
+			i := (height * x) + y
+			r, g, b := colorutil.HslToRgb(h[i],s[i],l[i])
+			newImg.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 		}
-		//fmt.Printf("starting worker for range %d:%d\n", start, end)
-		go reduceWorker(data[start:end], f, c)
 	}
-
-	first, second := <-c, <-c
-
-	value = f(first, second)
-
-	for i := 2; i < nWorkers; i++ {
-		value = f(value, <- c)
-	}
-	return value
-}
-
-func binOpWorker(a []float64, b []float64, to []float64, f func(float64, float64) float64, done chan bool){
-	for i := 0; i < len(a); i++ {
-		to[i] = f(a[i], b[i])
-	}
-	done <- true
-}
-
-func runBinOp(a []float64, b []float64, to []float64, f func(float64, float64) float64) error{
-	if len(a) != len(to) || len(b) != len(to) {
-		return fmt.Errorf("Map failed, a, b, and to fields of different lengths.\na:%d\nb:%d\nto:%d\n", len(a), len(b), len(to))
-	}
-	rows := len(a)
-	rowsPerThread := rows / nThreads
-	c := make(chan bool)
-	for i := 0; i < nThreads; i++ {
-		start := i * rowsPerThread
-		var end int
-		if i == nThreads-1 {
-			end = rows
-		} else {
-			end = (i+1) * rowsPerThread
-		}
-		//fmt.Printf("starting worker for range %d:%d\n", start, end)
-		go binOpWorker(a[start:end], b[start:end], to[start:end], f, c)
-	}
-	for i := 0; i < nThreads; i++ {
-		<- c
-	}
-	return nil
+	return newImg
 }
 
 func linearizeImage(img image.Image) {
@@ -158,36 +78,36 @@ func linearizeImage(img image.Image) {
 }
 
 func main() {
-	fmt.Printf("String with %d worker threads\n", nThreads)
-	a := make([]float64, 100)
-	b := make([]float64, 100)
-	//c := make([]float64, 100)
-	//d := make([]float64, 100)
-	//e := make([]float64, 100)
-	for i := 0; i < 100; i++ {
-		a[i] = float64(i + 1)
+
+	//reader := bufio.NewReader(os.Stdin)
+	//fmt.Print("Enter the path to the PNG file: ")
+	//filePath, _ := reader.ReadString('\n')
+	filePath := "23-8-2-Eagle-edited.png\n"
+
+	inFile, err := os.Open(filePath[:len(filePath)-1])
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return
 	}
+	defer inFile.Close()
 
-	// copy a to b
-	runMap(a, b, func(val float64) float64 {
-		return val
-	})
-	fmt.Println(b[0:10])
+	img, err := png.Decode(inFile)
+	if err != nil {
+		fmt.Println("Error decoding PNG:", err)
+		return
+	}
+	inFile.Close()
 
-	// add a and b and save to b
-	runBinOp(a, b, b, func(val1 float64, val2 float64) float64 {
-		return val1 + val2
-	})
-	fmt.Println(b[0:10])
+	rainbow := rainbowize(img)
 
+	fmt.Println("Step n: writing")
 
-	asum := runReduce(a, func(v1 float64, v2 float64) float64 {
-		return v1 + v2
-	})
-	fmt.Println(asum)
+	outFile, err := os.Create("output.png")
 
-	bsum := runReduce(b, func(v1 float64, v2 float64) float64 {
-		return v1 + v2
-	})
-	fmt.Println(bsum)
+	defer outFile.Close()
+
+	// Encode the image as PNG and write it to the file
+	png.Encode(outFile, rainbow)
+
+	fmt.Println("Done!")
 }

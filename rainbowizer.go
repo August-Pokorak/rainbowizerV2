@@ -46,9 +46,17 @@ func angleToCentered(a float64) float64 {
 }
 
 func v1SpreadFunction(x float64) float64 {
-	a := float64(.05)
-	b := float64(32)
-	return (1 + a*x - math.Exp2(-b*x)) / (a + 1)
+	a := float64(1.2)
+	b := float64(64)
+	c := float64(0.05)
+	x1 := math.Abs(x)
+	v := (1 - math.Exp(-b * math.Pow(x1, a)) + (c * x1)) / (1 + c)
+	if math.Signbit(x) {
+		return v
+	} else {
+		return -v
+	}
+
 }
 
 func f64Sum(f float64, f2 float64) float64 {
@@ -65,6 +73,8 @@ func rainbowize(img image.Image) image.Image {
 
 	totalPx := int64(width) * int64(height)
 
+	alpha := make([]uint32, totalPx)
+
 	h := make([]float64, totalPx)
 	s := make([]float64, totalPx)
 	l := make([]float64, totalPx)
@@ -78,7 +88,8 @@ func rainbowize(img image.Image) image.Image {
 		for y := 0; y < height; y++ {
 			i := (height * x) + y
 
-			r, g, b, _ := img.At(x, y).RGBA()
+			r, g, b, a := img.At(x, y).RGBA()
+			alpha[i] = a
 			h[i], s[i], l[i] = colorutil.RgbToHsl(
 				float64(r)/0xffff*255,
 				float64(g)/0xffff*255,
@@ -89,7 +100,7 @@ func rainbowize(img image.Image) image.Image {
 	fmt.Println("Step 2: calculating statistics")
 	// calculate weights based on s, l
 	runBinOp[float64, float64, float64](s, l, weights, func(f float64, f2 float64) float64 {
-		return math.Pow(f * (1 - 2 * math.Abs(f2 - 0.5)), 3)
+		return math.Pow(f * (1 - 2 * math.Abs(f2 - 0.5)), 4)
 	})
 
 	totalWeight := runReduce[float64](weights, f64Sum)
@@ -127,7 +138,7 @@ func rainbowize(img image.Image) image.Image {
 		for y := 0; y < height; y++ {
 			i := (height * x) + y
 			r, g, b := colorutil.HslToRgb(h[i], s[i], l[i])
-			newImg.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
+			newImg.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: uint8(alpha[i])})
 		}
 	}
 	return newImg
@@ -142,7 +153,7 @@ func main() {
 	filePath = strings.TrimSpace(filePath)
 	//filePath := "23-8-2-Eagle-edited.png\n"
 
-	println(filePath)
+	//println(filePath)
 
 	if !strings.Contains(filePath, ".png") {
 		fmt.Println("Invalid file type, please provide png")

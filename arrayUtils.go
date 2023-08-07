@@ -127,3 +127,47 @@ func runBinOp[A any, B any, T any](a []A, b []B, to []T, f func(A, B) T) error{
 	}
 	return nil
 }
+
+func histWorker(on []int, to []float64, weights []float64, done chan []float64){
+	for i := 0; i < len(on); i++ {
+		to[on[i]] += weights[i]
+	}
+	done <- to
+}
+
+func runHist(on []int, to []float64, weights []float64, max int) error{
+	if len(on) != len(weights) {
+		return fmt.Errorf("Hist failed, on, weights of different length.\non:%d\nweights:%d\nto:%d\n", len(on), len(to))
+	}
+	rows := len(on)
+	rowsPerThread := rows / nThreads
+	c := make(chan []float64)
+	for i := 0; i < nThreads; i++ {
+		start := i * rowsPerThread
+		var end int
+		if i == nThreads-1 {
+			end = rows
+		} else {
+			end = (i+1) * rowsPerThread
+		}
+		out := make([]float64, max)
+		for j := 0; j < max; j++ {
+			out[j] = 0
+		}
+		//fmt.Printf("starting worker for range %d:%d\n", start, end)
+		go histWorker(on[start:end], out, weights[start:end], c)
+	}
+
+	for i := 0; i < max; i++ {
+		to[i] = 0
+	}
+
+	for i := 0; i < nThreads; i++ {
+		out := <- c
+		for j := 0; j < max; j++ {
+			to[j] += out[j]
+		}
+	}
+	return nil
+}
+
